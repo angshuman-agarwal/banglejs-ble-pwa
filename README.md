@@ -1,3 +1,5 @@
+<img src="../images/bangle.png" align="right" width="100" alt="Bangle.js">
+
 # PWA Test - How to Run and Access on Android
 
 ## Step 1: Generate Icons (One Time)
@@ -10,7 +12,7 @@
 
 ### Option A: Python (if installed)
 ```powershell
-cd c:\Users\jimmy\bangle-watch\pwa-test
+cd c:\Users\angshuman\bangle-watch\pwa-test
 python -m http.server 8080
 ```
 
@@ -97,8 +99,6 @@ For true "always accessible" from anywhere, you'd need:
 2. **Deploy to GitHub Pages** (free hosting):
    - Push to GitHub
    - Enable Pages in repo settings
-   - Access at: https://yourusername.github.io/repo-name/
+   - Access at: https://github.com/angshuman-agarwal/banglejs-ble-pwa
 
-3. **Deploy to Netlify/Vercel** (free):
-   - Drag & drop folder to deploy
-   - Get instant HTTPS URL
+
