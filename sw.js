@@ -93,4 +93,33 @@ self.addEventListener('push', (event) => {
     console.log('[SW] Push received');
 });
 
+// Handle notification clicks - open app and trigger reconnect
+self.addEventListener('notificationclick', (event) => {
+    console.log('[SW] Notification clicked:', event.action);
+    
+    event.notification.close();
+    
+    // Focus existing window or open new one
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true })
+            .then((clientList) => {
+                // If app is already open, focus it
+                for (const client of clientList) {
+                    if (client.url.includes('index.html') && 'focus' in client) {
+                        client.focus();
+                        // Send message to trigger reconnect
+                        if (event.action === 'reconnect') {
+                            client.postMessage({ action: 'reconnect' });
+                        }
+                        return;
+                    }
+                }
+                // Otherwise open new window
+                if (clients.openWindow) {
+                    return clients.openWindow('/index.html');
+                }
+            })
+    );
+});
+
 console.log('[SW] Service Worker loaded');

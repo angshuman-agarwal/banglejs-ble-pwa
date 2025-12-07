@@ -48,6 +48,61 @@
             margin-bottom: 30px;
         }
         
+        .btn-small {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            font-size: 0.9em;
+            cursor: pointer;
+        }
+        
+        /* Toggle Switch */
+        .switch {
+            position: relative;
+            width: 50px;
+            height: 26px;
+        }
+        
+        .switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+        
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #444;
+            transition: .3s;
+            border-radius: 26px;
+        }
+        
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 20px;
+            width: 20px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: .3s;
+            border-radius: 50%;
+        }
+        
+        input:checked + .slider {
+            background-color: #6200ee;
+        }
+        
+        input:checked + .slider:before {
+            transform: translateX(24px);
+        }
+        
         .status-card {
             background: rgba(255,255,255,0.1);
             border-radius: 16px;
@@ -226,6 +281,32 @@
         <button class="btn btn-primary" id="connectBtn">🔗 Connect to Bangle.js</button>
         <button class="btn btn-secondary" id="disconnectBtn" disabled>❌ Disconnect</button>
         
+        <!-- New: Auto-reconnect and Wake Lock controls -->
+        <div class="status-card" style="margin-top: 16px;">
+            <div class="status-row">
+                <span>🔄 Auto-Reconnect</span>
+                <label class="switch">
+                    <input type="checkbox" id="autoReconnect" checked>
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="status-row">
+                <span>☀️ Keep Screen On</span>
+                <label class="switch">
+                    <input type="checkbox" id="wakeLock">
+                    <span class="slider"></span>
+                </label>
+            </div>
+            <div class="status-row">
+                <span>🔔 Notifications</span>
+                <button class="btn-small" id="notifyBtn">Enable</button>
+            </div>
+            <div class="status-row">
+                <span>Reconnect Attempts</span>
+                <span id="reconnectCount">0</span>
+            </div>
+        </div>
+        
         <!-- Log Display -->
         <h3 style="margin: 20px 0 10px;">📋 Log</h3>
         <div class="data-display" id="logDisplay">
@@ -254,6 +335,237 @@
         let connection = null;
         let samples = 0;
         let deferredPrompt = null;
+        let reconnectAttempts = 0;
+        let wakeLockObj = null;
+        let lastDataTime = Date.now();
+        let heartbeatInterval = null;
+        let isManualDisconnect = false;
+        
+        // ============ NOTIFICATION SETUP ============
+        
+        const notifyBtn = document.getElementById('notifyBtn');
+        
+        async function requestNotificationPermission() {
+            if (!('Notification' in window)) {
+                log('Notifications not supported', 'error');
+                return false;
+            }
+            
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                log('🔔 Notifications enabled!', 'info');
+                notifyBtn.textContent = 'Enabled ✓';
+                notifyBtn.disabled = true;
+                return true;
+            } else {
+                log('Notification permission denied', 'error');
+                return false;
+            }
+        }
+        
+        function showNotification(title, body, actions = []) {
+            if (Notification.permission !== 'granted') return;
+            
+            // Use service worker for actionable notifications
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.ready.then(registration => {
+                    registration.showNotification(title, {
+                        body: body,
+                        icon: 'icon-192.png',
+                        badge: 'icon-192.png',
+                        vibrate: [200, 100, 200],
+                        tag: 'ble-status',
+                        renotify: true,
+                        actions: actions,
+                        data: { url: window.location.href }
+                    });
+                });
+            } else {
+                // Fallback to basic notification
+                new Notification(title, { body, icon: 'icon-192.png' });
+            }
+        }
+        
+        notifyBtn.addEventListener('click', requestNotificationPermission);
+        
+        // ============ WAKE LOCK (Keep Screen On) ============
+        
+        const wakeLockCheckbox = document.getElementById('wakeLock');
+        
+        async function requestWakeLock() {
+            if (!('wakeLock' in navigator)) {
+                log('Wake Lock not supported', 'error');
+                return false;
+            }
+            
+            try {
+                wakeLockObj = await navigator.wakeLock.request('screen');
+                log('☀️ Screen will stay on', 'info');
+                
+                wakeLockObj.addEventListener('release', () => {
+                    log('Wake Lock released', 'info');
+                    wakeLockCheckbox.checked = false;
+                });
+                
+                return true;
+            } catch (err) {
+                log(`Wake Lock error: ${err.message}`, 'error');
+                return false;
+            }
+        }
+        
+        function releaseWakeLock() {
+            if (wakeLockObj) {
+                wakeLockObj.release();
+                wakeLockObj = null;
+                log('Screen can sleep now', 'info');
+            }
+        }
+        
+        wakeLockCheckbox.addEventListener('change', (e) => {
+            if (e.target.checked) {
+                requestWakeLock();
+            } else {
+                releaseWakeLock();
+            }
+        });
+        
+        // Re-acquire wake lock when page becomes visible again
+        document.addEventListener('visibilitychange', async () => {
+            if (document.visibilityState === 'visible' && wakeLockCheckbox.checked && !wakeLockObj) {
+                await requestWakeLock();
+            }
+        });
+        
+        // ============ AUTO-RECONNECT LOGIC ============
+        
+        const autoReconnectCheckbox = document.getElementById('autoReconnect');
+        const reconnectCountEl = document.getElementById('reconnectCount');
+        
+        function startHeartbeat() {
+            // Check every 5 seconds if we're still receiving data
+            heartbeatInterval = setInterval(() => {
+                if (connection && Date.now() - lastDataTime > 10000) {
+                    log('⚠️ No data for 10s - connection may be lost', 'error');
+                    handleDisconnect();
+                }
+            }, 5000);
+        }
+        
+        function stopHeartbeat() {
+            if (heartbeatInterval) {
+                clearInterval(heartbeatInterval);
+                heartbeatInterval = null;
+            }
+        }
+        
+        function handleDisconnect() {
+            stopHeartbeat();
+            resetUI();
+            
+            if (isManualDisconnect) {
+                isManualDisconnect = false;
+                return;
+            }
+            
+            // Show notification
+            showNotification(
+                '🔴 Bangle.js Disconnected',
+                'Tap to reconnect',
+                [{ action: 'reconnect', title: '🔄 Reconnect' }]
+            );
+            
+            // Auto-reconnect if enabled
+            if (autoReconnectCheckbox.checked) {
+                attemptReconnect();
+            }
+        }
+        
+        function attemptReconnect() {
+            reconnectAttempts++;
+            reconnectCountEl.textContent = reconnectAttempts;
+            
+            const delay = Math.min(reconnectAttempts * 2000, 10000); // Max 10s delay
+            log(`🔄 Reconnecting in ${delay/1000}s... (attempt ${reconnectAttempts})`, 'info');
+            
+            setTimeout(() => {
+                if (!connection && autoReconnectCheckbox.checked) {
+                    log('🔄 Attempting reconnect...', 'info');
+                    connectToBangle();
+                }
+            }, delay);
+        }
+        
+        // ============ CONNECTION LOGIC (Refactored) ============
+        
+        function connectToBangle() {
+            log('Scanning for Bluetooth devices...', 'info');
+            
+            Puck.connect(function(conn) {
+                if (!conn) {
+                    log('Connection cancelled or failed', 'error');
+                    if (autoReconnectCheckbox.checked && reconnectAttempts < 5) {
+                        attemptReconnect();
+                    }
+                    return;
+                }
+                
+                connection = conn;
+                reconnectAttempts = 0; // Reset on successful connection
+                reconnectCountEl.textContent = '0';
+                
+                bleStatus.classList.add('connected');
+                deviceName.textContent = 'Bangle.js';
+                connectBtn.disabled = true;
+                disconnectBtn.disabled = false;
+                log('✅ Connected to Bangle.js!', 'info');
+                
+                // Show success notification
+                showNotification('🟢 Bangle.js Connected', 'Receiving accelerometer data');
+                
+                // Start accelerometer
+                log('Starting accelerometer at 12.5Hz...', 'info');
+                connection.write('\x03'); // Ctrl+C to clear
+                setTimeout(() => {
+                    connection.write(`
+                        Bangle.on('accel', function(a) {
+                            Bluetooth.println(JSON.stringify(a));
+                        });
+                        Bangle.setPollInterval(80);
+                    \n`);
+                    log('Accelerometer started!', 'info');
+                    startHeartbeat();
+                }, 500);
+                
+                // Handle incoming data
+                connection.on('data', function(data) {
+                    lastDataTime = Date.now(); // Update heartbeat
+                    try {
+                        const lines = data.split('\n');
+                        lines.forEach(line => {
+                            if (line.includes('"x"')) {
+                                const accel = JSON.parse(line);
+                                samples++;
+                                sampleCount.textContent = samples;
+                                updateAccel(accel.x, accel.y, accel.z);
+                                
+                                if (samples % 50 === 0) {
+                                    log(`Received ${samples} samples`);
+                                }
+                            }
+                        });
+                    } catch (e) {
+                        // Ignore parse errors
+                    }
+                });
+                
+                // Handle disconnection
+                connection.on('close', function() {
+                    log('⚠️ Disconnected!', 'error');
+                    handleDisconnect();
+                });
+            });
+        }
         
         // Logging function
         function log(message, type = 'normal') {
@@ -271,74 +583,16 @@
             accelZ.textContent = z.toFixed(2);
         }
         
-        // Connect to Bangle.js
-        connectBtn.addEventListener('click', async () => {
-            log('Scanning for Bluetooth devices...', 'info');
-            
-            try {
-                Puck.connect(function(conn) {
-                    if (!conn) {
-                        log('Connection cancelled or failed', 'error');
-                        return;
-                    }
-                    
-                    connection = conn;
-                    bleStatus.classList.add('connected');
-                    deviceName.textContent = 'Bangle.js';
-                    connectBtn.disabled = true;
-                    disconnectBtn.disabled = false;
-                    log('✅ Connected to Bangle.js!', 'info');
-                    
-                    // Start accelerometer
-                    log('Starting accelerometer at 12.5Hz...', 'info');
-                    connection.write('\x03'); // Ctrl+C to clear
-                    setTimeout(() => {
-                        connection.write(`
-                            Bangle.on('accel', function(a) {
-                                Bluetooth.println(JSON.stringify(a));
-                            });
-                            Bangle.setPollInterval(80);
-                        \n`);
-                        log('Accelerometer started!', 'info');
-                    }, 500);
-                    
-                    // Handle incoming data
-                    connection.on('data', function(data) {
-                        try {
-                            // Parse accelerometer data
-                            const lines = data.split('\n');
-                            lines.forEach(line => {
-                                if (line.includes('"x"')) {
-                                    const accel = JSON.parse(line);
-                                    samples++;
-                                    sampleCount.textContent = samples;
-                                    updateAccel(accel.x, accel.y, accel.z);
-                                    
-                                    // Log every 50th sample to avoid spam
-                                    if (samples % 50 === 0) {
-                                        log(`Received ${samples} samples`);
-                                    }
-                                }
-                            });
-                        } catch (e) {
-                            // Ignore parse errors for partial data
-                        }
-                    });
-                    
-                    // Handle disconnection
-                    connection.on('close', function() {
-                        log('⚠️ Disconnected!', 'error');
-                        resetUI();
-                    });
-                });
-            } catch (error) {
-                log(`Error: ${error.message}`, 'error');
-            }
+        // Connect to Bangle.js (uses refactored connectToBangle function)
+        connectBtn.addEventListener('click', () => {
+            connectToBangle();
         });
         
         // Disconnect
         disconnectBtn.addEventListener('click', () => {
             if (connection) {
+                isManualDisconnect = true; // Don't auto-reconnect
+                stopHeartbeat();
                 connection.close();
                 log('Disconnected by user', 'info');
                 resetUI();
@@ -397,6 +651,14 @@
                 .catch(err => {
                     log(`SW Error: ${err.message}`, 'error');
                 });
+            
+            // Listen for messages from service worker (e.g., reconnect from notification)
+            navigator.serviceWorker.addEventListener('message', (event) => {
+                if (event.data.action === 'reconnect' && !connection) {
+                    log('🔔 Reconnect triggered from notification', 'info');
+                    connectToBangle();
+                }
+            });
         }
         
         // Check Bluetooth availability
