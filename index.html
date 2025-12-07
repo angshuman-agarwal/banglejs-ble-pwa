@@ -347,6 +347,25 @@
             console.log(`[${type}] ${message}`);
         }
         
+        // ============ SHOW NOTIFICATION (works on mobile) ============
+        function showNotification(title, body) {
+            if (Notification.permission !== 'granted') return;
+            
+            // Use Service Worker notification on mobile
+            if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+                navigator.serviceWorker.ready.then(function(reg) {
+                    reg.showNotification(title, { body: body, icon: 'icon-192.png' });
+                });
+            } else {
+                // Fallback for desktop
+                try {
+                    new Notification(title, { body: body, icon: 'icon-192.png' });
+                } catch (e) {
+                    console.log('Notification not supported:', e);
+                }
+            }
+        }
+        
         // ============ UI HELPERS ============
         function updateAccel(x, y, z) {
             accelX.textContent = x.toFixed(2);
@@ -408,12 +427,7 @@
                     log('✅ Connected! Make gestures with your watch.', 'info');
                     
                     // Show notification
-                    if (Notification.permission === 'granted') {
-                        new Notification('🟢 Bangle.js Connected', { 
-                            body: 'Make gestures to see them detected',
-                            icon: 'icon-192.png'
-                        });
-                    }
+                    showNotification('🟢 Bangle.js Connected', 'Make gestures to see them detected');
                 })
                 .catch(function(err) {
                     log('Connection failed: ' + err, 'error');
@@ -484,10 +498,7 @@
                 notifyBtn.textContent = 'Enabled ✓';
                 notifyBtn.disabled = true;
                 
-                new Notification('Notifications Enabled', {
-                    body: 'You will be notified when Bluetooth connects/disconnects',
-                    icon: 'icon-192.png'
-                });
+                showNotification('Notifications Enabled', 'You will be notified when Bluetooth connects/disconnects');
             } else {
                 log('Notification permission denied', 'error');
             }
