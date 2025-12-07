@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <!-- PWA Meta Tags -->
+    <meta name="theme-color" content="#6200ee">
+    <meta name="description" content="Test BLE connection with Bangle.js">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    
+    <!-- Link to PWA Manifest -->
+    <link rel="manifest" href="manifest.json">
+    <link rel="apple-touch-icon" href="icon-192.png">
+    
+    <title>BLE Test PWA</title>
+    
+    <style>
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            text-align: center;
+            margin-bottom: 10px;
+            font-size: 1.8em;
+        }
+        
+        .subtitle {
+            text-align: center;
+            color: #888;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: rgba(255,255,255,0.1);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .status-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+        }
+        
+        .status-row:last-child {
+            border-bottom: none;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ff4444;
+        }
+        
+        .status-indicator.connected {
+            background: #44ff44;
+            box-shadow: 0 0 10px #44ff44;
+        }
+        
+        .btn {
+            width: 100%;
+            padding: 16px;
+            border: none;
+            border-radius: 12px;
+            font-size: 1.1em;
+            font-weight: bold;
+            cursor: pointer;
+            margin-bottom: 12px;
+            transition: transform 0.1s, opacity 0.1s;
+        }
+        
+        .btn:active {
+            transform: scale(0.98);
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #6200ee, #9c27b0);
+            color: white;
+        }
+        
+        .btn-secondary {
+            background: rgba(255,255,255,0.2);
+            color: white;
+        }
+        
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        
+        .data-display {
+            background: #000;
+            border-radius: 12px;
+            padding: 16px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9em;
+            min-height: 150px;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+        
+        .data-line {
+            margin: 4px 0;
+            color: #0f0;
+        }
+        
+        .data-line.error {
+            color: #f44;
+        }
+        
+        .data-line.info {
+            color: #4af;
+        }
+        
+        .accel-display {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+        
+        .accel-box {
+            background: rgba(255,255,255,0.1);
+            border-radius: 12px;
+            padding: 16px;
+            text-align: center;
+        }
+        
+        .accel-label {
+            font-size: 0.8em;
+            color: #888;
+        }
+        
+        .accel-value {
+            font-size: 1.5em;
+            font-weight: bold;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .install-prompt {
+            background: linear-gradient(135deg, #ff9800, #f57c00);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 20px;
+            display: none;
+        }
+        
+        .install-prompt.show {
+            display: block;
+        }
+        
+        .sample-count {
+            text-align: center;
+            font-size: 2em;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📱 BLE Test PWA</h1>
+        <p class="subtitle">Test Bluetooth on your Android</p>
+        
+        <!-- Install Prompt -->
+        <div class="install-prompt" id="installPrompt">
+            <strong>📲 Install this app!</strong>
+            <p style="margin: 8px 0;">Add to your home screen for the best experience.</p>
+            <button class="btn btn-secondary" id="installBtn" style="margin: 0;">Install App</button>
+        </div>
+        
+        <!-- Status Card -->
+        <div class="status-card">
+            <div class="status-row">
+                <span>Bluetooth</span>
+                <div class="status-indicator" id="bleStatus"></div>
+            </div>
+            <div class="status-row">
+                <span>Device</span>
+                <span id="deviceName">Not connected</span>
+            </div>
+            <div class="status-row">
+                <span>Samples Received</span>
+                <span id="sampleCount">0</span>
+            </div>
+        </div>
+        
+        <!-- Accelerometer Display -->
+        <div class="accel-display">
+            <div class="accel-box">
+                <div class="accel-label">X</div>
+                <div class="accel-value" id="accelX">-</div>
+            </div>
+            <div class="accel-box">
+                <div class="accel-label">Y</div>
+                <div class="accel-value" id="accelY">-</div>
+            </div>
+            <div class="accel-box">
+                <div class="accel-label">Z</div>
+                <div class="accel-value" id="accelZ">-</div>
+            </div>
+        </div>
+        
+        <!-- Buttons -->
+        <button class="btn btn-primary" id="connectBtn">🔗 Connect to Bangle.js</button>
+        <button class="btn btn-secondary" id="disconnectBtn" disabled>❌ Disconnect</button>
+        
+        <!-- Log Display -->
+        <h3 style="margin: 20px 0 10px;">📋 Log</h3>
+        <div class="data-display" id="logDisplay">
+            <div class="data-line info">Ready. Click Connect to start.</div>
+        </div>
+    </div>
+    
+    <!-- UART.js Library -->
+    <script src="https://www.puck-js.com/puck.js"></script>
+    
+    <script>
+        // DOM Elements
+        const connectBtn = document.getElementById('connectBtn');
+        const disconnectBtn = document.getElementById('disconnectBtn');
+        const bleStatus = document.getElementById('bleStatus');
+        const deviceName = document.getElementById('deviceName');
+        const sampleCount = document.getElementById('sampleCount');
+        const logDisplay = document.getElementById('logDisplay');
+        const accelX = document.getElementById('accelX');
+        const accelY = document.getElementById('accelY');
+        const accelZ = document.getElementById('accelZ');
+        const installPrompt = document.getElementById('installPrompt');
+        const installBtn = document.getElementById('installBtn');
+        
+        // State
+        let connection = null;
+        let samples = 0;
+        let deferredPrompt = null;
+        
+        // Logging function
+        function log(message, type = 'normal') {
+            const line = document.createElement('div');
+            line.className = `data-line ${type}`;
+            line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDisplay.appendChild(line);
+            logDisplay.scrollTop = logDisplay.scrollHeight;
+        }
+        
+        // Update accelerometer display
+        function updateAccel(x, y, z) {
+            accelX.textContent = x.toFixed(2);
+            accelY.textContent = y.toFixed(2);
+            accelZ.textContent = z.toFixed(2);
+        }
+        
+        // Connect to Bangle.js
+        connectBtn.addEventListener('click', async () => {
+            log('Scanning for Bluetooth devices...', 'info');
+            
+            try {
+                Puck.connect(function(conn) {
+                    if (!conn) {
+                        log('Connection cancelled or failed', 'error');
+                        return;
+                    }
+                    
+                    connection = conn;
+                    bleStatus.classList.add('connected');
+                    deviceName.textContent = 'Bangle.js';
+                    connectBtn.disabled = true;
+                    disconnectBtn.disabled = false;
+                    log('✅ Connected to Bangle.js!', 'info');
+                    
+                    // Start accelerometer
+                    log('Starting accelerometer at 12.5Hz...', 'info');
+                    connection.write('\x03'); // Ctrl+C to clear
+                    setTimeout(() => {
+                        connection.write(`
+                            Bangle.on('accel', function(a) {
+                                Bluetooth.println(JSON.stringify(a));
+                            });
+                            Bangle.setPollInterval(80);
+                        \n`);
+                        log('Accelerometer started!', 'info');
+                    }, 500);
+                    
+                    // Handle incoming data
+                    connection.on('data', function(data) {
+                        try {
+                            // Parse accelerometer data
+                            const lines = data.split('\n');
+                            lines.forEach(line => {
+                                if (line.includes('"x"')) {
+                                    const accel = JSON.parse(line);
+                                    samples++;
+                                    sampleCount.textContent = samples;
+                                    updateAccel(accel.x, accel.y, accel.z);
+                                    
+                                    // Log every 50th sample to avoid spam
+                                    if (samples % 50 === 0) {
+                                        log(`Received ${samples} samples`);
+                                    }
+                                }
+                            });
+                        } catch (e) {
+                            // Ignore parse errors for partial data
+                        }
+                    });
+                    
+                    // Handle disconnection
+                    connection.on('close', function() {
+                        log('⚠️ Disconnected!', 'error');
+                        resetUI();
+                    });
+                });
+            } catch (error) {
+                log(`Error: ${error.message}`, 'error');
+            }
+        });
+        
+        // Disconnect
+        disconnectBtn.addEventListener('click', () => {
+            if (connection) {
+                connection.close();
+                log('Disconnected by user', 'info');
+                resetUI();
+            }
+        });
+        
+        // Reset UI state
+        function resetUI() {
+            connection = null;
+            bleStatus.classList.remove('connected');
+            deviceName.textContent = 'Not connected';
+            connectBtn.disabled = false;
+            disconnectBtn.disabled = true;
+            updateAccel(0, 0, 0);
+        }
+        
+        // ============ PWA INSTALL HANDLING ============
+        
+        // Capture the install prompt
+        window.addEventListener('beforeinstallprompt', (e) => {
+            e.preventDefault();
+            deferredPrompt = e;
+            installPrompt.classList.add('show');
+            log('📲 App can be installed!', 'info');
+        });
+        
+        // Handle install button click
+        installBtn.addEventListener('click', async () => {
+            if (!deferredPrompt) return;
+            
+            deferredPrompt.prompt();
+            const { outcome } = await deferredPrompt.userChoice;
+            
+            if (outcome === 'accepted') {
+                log('✅ App installed!', 'info');
+            } else {
+                log('Install cancelled', 'info');
+            }
+            
+            deferredPrompt = null;
+            installPrompt.classList.remove('show');
+        });
+        
+        // Detect if running as installed PWA
+        if (window.matchMedia('(display-mode: standalone)').matches) {
+            log('🎉 Running as installed PWA!', 'info');
+        }
+        
+        // ============ SERVICE WORKER REGISTRATION ============
+        
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(reg => {
+                    log('Service Worker registered', 'info');
+                })
+                .catch(err => {
+                    log(`SW Error: ${err.message}`, 'error');
+                });
+        }
+        
+        // Check Bluetooth availability
+        if (!navigator.bluetooth) {
+            log('❌ Web Bluetooth not supported!', 'error');
+            connectBtn.disabled = true;
+        }
+    </script>
+</body>
+</html>
