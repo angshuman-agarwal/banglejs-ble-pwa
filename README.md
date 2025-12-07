@@ -1,4 +1,4 @@
-<img src="../images/bangle.png" align="right" width="100" alt="Bangle.js">
+<img src="bangle.png" align="right" width="100" alt="Bangle.js">
 
 # PWA Test - How to Run and Access on Android
 
