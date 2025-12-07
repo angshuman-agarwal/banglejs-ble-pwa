@@ -315,6 +315,7 @@
     <script>
         // ============ UART Setup (same as gesture app) ============
         UART.ports = UART.ports.filter(e => e.includes("Bluetooth"));
+        UART.timeoutMax = 200;
         
         // ============ DOM ELEMENTS ============
         const connectBtn = document.getElementById('connectBtn');
